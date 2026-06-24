@@ -1,0 +1,142 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HOMETACT ダッシュボード（ライブ版・PoC）</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--box:#EDEFF3;--pill:#F1F3F6;--blue:#2E6FB7;--hl:#EAF2FB;--ink:#222b38;--gray:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;background:#e9ebee;font-family:"Noto Sans JP",sans-serif;color:var(--ink)}
+.topbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 22px}
+.topbar .t{font-size:15px;font-weight:700}.topbar .s{font-size:11px;color:var(--gray)}
+.gbar{background:#fff;border-bottom:1px solid var(--line);padding:10px 18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.gbar label{font-size:11px;color:var(--gray);display:flex;flex-direction:column;gap:3px}
+.gbar input,.gbar select{font-family:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:6px}
+.gbar button{font-family:inherit;font-size:13px;font-weight:600;background:var(--blue);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;align-self:flex-end}
+.gbar .preset{background:var(--pill);border:1px solid var(--line);border-radius:16px;padding:6px 12px;font-size:12px;cursor:pointer;align-self:flex-end}
+.wrap{max-width:1200px;margin:0 auto;padding:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:18px 22px;margin-bottom:16px}
+.card h3{margin:0 0 14px;font-size:14px;font-weight:700}
+.kfunnel{display:flex;align-items:stretch}
+.kbox{background:var(--box);border-radius:5px;padding:16px 18px;flex:1;min-width:0}
+.kbox.hl{background:var(--hl)}
+.kbox-t{font-size:13px;color:#4b5563}.kbox-v{font-size:32px;font-weight:700;margin:5px 0}.kbox-s{font-size:12px;color:var(--gray)}
+.arrowcol{display:flex;flex-direction:column;align-items:center;justify-content:center;width:104px;flex-shrink:0}
+.arrowcol .ar{font-size:12px;color:#374151;margin-bottom:5px;white-space:nowrap}.arrowcol .aa{color:var(--blue);font-size:20px}
+.delta{font-weight:700}.delta.up{color:#188038}.delta.down{color:#d93025}.delta.flat{color:#9aa0a6}
+#status{font-size:12px;color:var(--gray);padding:4px 0}
+.err{color:#d93025}
+canvas{max-height:260px}
+</style></head><body>
+<div class="topbar"><div class="t">HOMETACT ｜ WEB数値ダッシュボード（ライブ版・PoC）</div>
+<div class="s">GA4をその場で取得 ・ 任意期間で集計</div></div>
+<div class="gbar">
+  <label>開始<input type="date" id="start"></label>
+  <label>終了<input type="date" id="end"></label>
+  <span class="preset" data-d="7">直近7日</span>
+  <span class="preset" data-d="28">直近28日</span>
+  <span class="preset" data-d="90">直近90日</span>
+  <label>チャネル<select id="ch"><option value="">全て</option></select></label>
+  <button id="go">更新</button>
+</div>
+<div class="wrap">
+  <div id="status">読み込み中…</div>
+  <div class="card"><h3>全体サマリー（流入→フォーム→CV）</h3><div class="kfunnel" id="funnel"></div></div>
+  <div class="card"><h3>日次トレンド（セッション / CV）</h3><canvas id="trend"></canvas></div>
+</div>
+<script>
+const BLUE="#2E6FB7";
+const $=id=>document.getElementById(id);
+function iso(d){return d.toISOString().slice(0,10);}
+function setPreset(days){const e=new Date(Date.now()-864e5);const s=new Date(Date.now()-864e5*days);$("start").value=iso(s);$("end").value=iso(e);}
+function prevRange(s,e){const sd=new Date(s),ed=new Date(e);const len=Math.round((ed-sd)/864e5)+1;const pe=new Date(sd-864e5);const ps=new Date(pe-864e5*(len-1));return [iso(ps),iso(pe)];}
+function fmt(n){return Math.round(n).toLocaleString();}
+function rt(a,b){return b?(a/b*100).toFixed(1)+"%":"—";}
+function dl(c,p){if(!p)return '<span class="delta flat">前期比 —</span>';const d=(c-p)/p*100;return '<span class="delta '+(d>=0?"up":"down")+'">前期比 '+(d>=0?"▲":"▼")+" "+Math.abs(d).toFixed(1)+"%</span>";}
+function kb(t,v,s,hl){return '<div class="kbox'+(hl?" hl":"")+'"><div class="kbox-t">'+t+'</div><div class="kbox-v">'+v+'</div><div class="kbox-s">'+s+'</div></div>';}
+function arw(l){return '<div class="arrowcol"><div class="ar">'+l+'</div><div class="aa">▶</div></div>';}
+
+// GA4 リクエスト組み立て
+const THANKS={filter:{fieldName:"pagePath",stringFilter:{matchType:"CONTAINS",value:"thanks"}}};
+const FORMSTART={filter:{fieldName:"eventName",stringFilter:{matchType:"EXACT",value:"form_start"}}};
+const FORMSUBMIT={andGroup:{expressions:[
+  {filter:{fieldName:"eventName",stringFilter:{matchType:"EXACT",value:"form_submit"}}},
+  {notExpression:{filter:{fieldName:"pagePath",stringFilter:{matchType:"CONTAINS",value:"/search"}}}}]}};
+function dr(s,e){return [{startDate:s,endDate:e}];}
+
+async function load(){
+  const s=$("start").value,e=$("end").value;
+  if(!s||!e){return;}
+  const [ps,pe]=prevRange(s,e);
+  $("status").textContent="GA4から取得中…";
+  const reports=[
+    // 0: by channel (cur) sessions/users
+    {dateRanges:dr(s,e),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"sessions"},{name:"totalUsers"}],limit:50},
+    // 1: by channel form_start users
+    {dateRanges:dr(s,e),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"totalUsers"}],dimensionFilter:FORMSTART,limit:50},
+    // 2: by channel form_submit (excl search) count
+    {dateRanges:dr(s,e),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"eventCount"}],dimensionFilter:FORMSUBMIT,limit:50},
+    // 3: by channel form_start count (for funnel form_start)
+    {dateRanges:dr(s,e),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"eventCount"}],dimensionFilter:FORMSTART,limit:50},
+    // 4: by channel thanks sessions (CV)
+    {dateRanges:dr(s,e),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"sessions"}],dimensionFilter:THANKS,limit:50},
+    // 5: prev by channel sessions/users + form_start users + thanks (for MoM)
+    {dateRanges:dr(ps,pe),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"sessions"},{name:"totalUsers"}],limit:50},
+    {dateRanges:dr(ps,pe),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"totalUsers"}],dimensionFilter:FORMSTART,limit:50},
+    {dateRanges:dr(ps,pe),dimensions:[{name:"sessionDefaultChannelGroup"}],metrics:[{name:"sessions"}],dimensionFilter:THANKS,limit:50},
+    // 8: trend daily sessions
+    {dateRanges:dr(s,e),dimensions:[{name:"date"}],metrics:[{name:"sessions"}],limit:400},
+    // 9: trend daily thanks (CV)
+    {dateRanges:dr(s,e),dimensions:[{name:"date"}],metrics:[{name:"sessions"}],dimensionFilter:THANKS,limit:400},
+  ];
+  let data;
+  try{
+    const resp=await fetch("/api/report",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reports})});
+    data=await resp.json();
+    if(data.error)throw new Error(data.error);
+  }catch(err){$("status").innerHTML='<span class="err">取得エラー: '+err+'</span>';return;}
+  render(data.reports,s,e);
+}
+
+function rowsToMap(rep,valIdx){const m={};(rep.rows||[]).forEach(r=>{m[r.dimensionValues[0].value]=Number(r.metricValues[valIdx].value);});return m;}
+function rowsToPair(rep){const m={};(rep.rows||[]).forEach(r=>{m[r.dimensionValues[0].value]={s:Number(r.metricValues[0].value),u:Number(r.metricValues[1].value)};});return m;}
+
+function render(R,s,e){
+  // channel dropdown (populate once from cur channels)
+  const sel=$("ch");
+  const chs=(R[0].rows||[]).map(r=>r.dimensionValues[0].value);
+  if(sel.options.length<=1){chs.forEach(c=>{const o=document.createElement("option");o.textContent=c;sel.appendChild(o);});}
+  const ch=sel.value;
+  const cur=rowsToPair(R[0]), curP=rowsToPair(R[5]);
+  const fU=rowsToMap(R[1],0), fUp=rowsToMap(R[6],0);
+  const fStart=rowsToMap(R[3],0), fSubmit=rowsToMap(R[2],0);
+  const cv=rowsToMap(R[4],0), cvP=rowsToMap(R[7],0);
+  const pick=(m,d)=>{if(ch)return m[ch]?(d?m[ch][d]:m[ch]):0;return Object.values(m).reduce((a,b)=>a+(d?(b[d]||0):(b||0)),0);};
+  const S=pick(cur,'s'),U=pick(cur,'u'),SP=pick(curP,'s'),UP=pick(curP,'u');
+  const FUU=pick(fU),FUUp=pick(fUp),CV=pick(cv),CVP=pick(cvP);
+  $("funnel").innerHTML=
+    kb("セッション / UU",fmt(S),"UU "+fmt(U)+"　"+dl(S,SP))
+   +arw("遷移率 "+rt(FUU,U))
+   +kb("フォーム到達 UU",fmt(FUU),dl(FUU,FUUp))
+   +arw("突破率 "+rt(CV,FUU))
+   +kb("総合CV数",fmt(CV),dl(CV,CVP),true)
+   +arw("CVR "+rt(CV,S));
+  // trend (all-channel)
+  const td=(R[8].rows||[]).map(r=>[r.dimensionValues[0].value,Number(r.metricValues[0].value)]).sort((a,b)=>a[0]<b[0]?-1:1);
+  const cvByDate={};(R[9].rows||[]).forEach(r=>cvByDate[r.dimensionValues[0].value]=Number(r.metricValues[0].value));
+  const labels=td.map(x=>x[0].slice(4,6)+"/"+x[0].slice(6,8));
+  if(window._tc)window._tc.destroy();
+  window._tc=new Chart($("trend"),{data:{labels,datasets:[
+    {type:"line",label:"セッション",data:td.map(x=>x[1]),borderColor:BLUE,yAxisID:"y",tension:.3,pointRadius:0},
+    {type:"bar",label:"CV",data:td.map(x=>cvByDate[x[0]]||0),backgroundColor:"#34A853",yAxisID:"y1"}]},
+    options:{maintainAspectRatio:false,plugins:{legend:{position:"bottom"}},scales:{y:{position:"left"},y1:{position:"right",grid:{drawOnChartArea:false}}}}});
+  $("status").textContent="期間 "+s+" 〜 "+e+"（取得完了）";
+}
+document.querySelectorAll(".preset").forEach(b=>b.onclick=()=>{setPreset(Number(b.dataset.d));load();});
+$("go").onclick=load;
+$("ch").onchange=()=>{ if(window._lastR) render(window._lastR,$("start").value,$("end").value); };
+// keep last reports for channel re-render without refetch
+const _origRender=render;
+render=function(R,s,e){window._lastR=R;_origRender(R,s,e);};
+setPreset(28);load();
+</script>
+</body></html>
