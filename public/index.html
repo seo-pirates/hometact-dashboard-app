@@ -326,11 +326,19 @@ function renderP3(ch){let rows='';
  else{const d=CD.byCh[ch];if(d)rows+=fRow(ch,d.s,d.fStart,d.fSubmit,d.cv);}
  document.getElementById('p3tbl').innerHTML=fHead()+rows;}
 function formType(p){if(p.indexOf('/inquiry')===0)return '問い合わせ';if(p.indexOf('/document')===0)return '資料請求';if(p.indexOf('/news/event')===0)return 'セミナー予約';if(/^\/(rental-apartment-developer|facial-recognition)/.test(p))return 'LP個別';return null;}
+function fRowSem(label,se,su,th){return '<div class="ftrow"><div class="ftlabel">'+jesc(label)+'</div>'
+ +'<div class="ftbox">'+fmtN(se)+'</div>'
+ +'<div class="ftarrow"><div class="r">フォーム無し</div><div class="a">▶</div></div>'
+ +'<div class="ftbox" style="color:#b6bdc7;font-weight:400;font-size:13px">—</div>'
+ +'<div class="ftarrow"><div class="r">遷移率 '+rtf(su,se)+'</div><div class="a">▶</div></div>'
+ +'<div class="ftbox">'+fmtN(su)+'</div>'
+ +'<div class="ftarrow"><div class="r">到達率 '+rtf(th,su)+'</div><div class="a">▶</div></div>'
+ +'<div class="ftbox hl">'+fmtN(th)+'</div></div>';}
 function renderP4(ch){const order=['問い合わせ','資料請求','セミナー予約','LP個別'];const agg={};order.forEach(t=>agg[t]={se:0,fs:0,su:0,th:0});
  CD.chPaths.forEach(r=>{if(ch!=='全て'&&r[0]!==ch)return;const t=formType(r[1]);if(t&&r[1].indexOf('thanks')<0&&agg[t]){agg[t].se+=r[2];agg[t].fs+=r[3];agg[t].su+=r[4];}});
  CD.p5_cv.forEach(r=>{if(ch!=='全て'&&r[0]!==ch)return;if(agg[r[3]])agg[r[3]].th+=r[4];});
  if(ch==='全て'&&agg['資料請求'])agg['資料請求'].th=CD.shiryoDL;
- let rows='';order.forEach(t=>{const a=agg[t];rows+=fRow(t,a.se,a.fs,a.su,a.th);});
+ let rows='';order.forEach(t=>{const a=agg[t];rows+=(t==='セミナー予約')?fRowSem(t,a.se,a.su,a.th):fRow(t,a.se,a.fs,a.su,a.th);});
  document.getElementById('p4tbl').innerHTML=fHead()+rows;}
 function needGuess(p){const M={'/advisor-signup':'導入検討・相談','/':'サービス全体把握','/inquiry':'問い合わせ意向','/document':'資料検討','/service':'サービス把握','/company':'企業確認','/cases':'比較・事例確認','/labs':'製品情報収集','/recommend':'比較検討','/news':'最新情報'};for(const k in M){if(p===k||p.indexOf(k+'/')===0)return M[k];}if(p.indexOf('/setup')>=0||p.indexOf('/device')>=0)return '既存利用者サポート';if(p.indexOf('/case')>=0)return '比較・情報収集';if(p.indexOf('/news/event')>=0)return 'セミナー関心';return '情報収集';}
 function renderP9(ch){const rows=(CD.chLand[ch]||[]).slice(0,12);
