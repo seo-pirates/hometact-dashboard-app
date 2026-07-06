@@ -15,32 +15,35 @@ export async function onRequestPost(context) {
     const token = await getAccessToken(env);
     const prop = env.GA4_PROPERTY || "533729605";
     const out = { reports: [], gsc: [] };
+    const H = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-    for (const rep of (body.reports || [])) {
-      const r = await fetch(
-        `https://analyticsdata.googleapis.com/v1beta/properties/${prop}:runReport`,
-        { method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify(rep) });
-      out.reports.push(await r.json());
-    }
+    // GA4 レポートを並列取得（GA4の同時実行上限に配慮しconcurrency=8）
+    out.reports = await mapLimit(body.reports || [], 8, (rep) =>
+      fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${prop}:runReport`,
+        { method: "POST", headers: H, body: JSON.stringify(rep) }).then((r) => r.json()));
 
     if (body.gsc && body.gsc.length) {
       const site = encodeURIComponent(env.GSC_SITE || "https://hometact.biz/");
-      for (const q of body.gsc) {
-        const r = await fetch(
-          `https://www.googleapis.com/webmasters/v3/sites/${site}/searchAnalytics/query`,
-          { method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(q) });
-        out.gsc.push(await r.json());
-      }
+      out.gsc = await mapLimit(body.gsc, 4, (q) =>
+        fetch(`https://www.googleapis.com/webmasters/v3/sites/${site}/searchAnalytics/query`,
+          { method: "POST", headers: H, body: JSON.stringify(q) }).then((r) => r.json()));
     }
 
     return json(out);
   } catch (e) {
     return json({ error: String(e && e.message || e) }, 500);
   }
+}
+
+// 同時実行数を制限しつつ並列実行（順序は保持）
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, worker));
+  return out;
 }
 
 function json(obj, status = 200) {
