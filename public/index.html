@@ -314,7 +314,10 @@ function renderReport(P,tw,twc,lw,lwc,tm,tmc,lm,lmc,ty,tyc){
   return h+'</tbody></table>';}
  document.getElementById('wrweek').innerHTML=tbl(tw,lw,twc,lwc);
  document.getElementById('wrmonth').innerHTML=tbl(tm,lm,tmc,lmc);}
-function setGran(g){GRAN=g;document.querySelectorAll('.gseg').forEach(b=>b.classList.toggle('active',b.dataset.g===g));renderP2();}
+function setGran(g){GRAN=g;document.querySelectorAll('.gseg').forEach(b=>b.classList.toggle('active',b.dataset.g===g));
+ const y=new Date(Date.now()-864e5);document.getElementById('d_end').value=ymdL(y);
+ document.getElementById('d_start').value = g==='m' ? ymdL(new Date(y.getFullYear(),y.getMonth()-5,1)) : ymdL(new Date(Date.now()-864e5*84));
+ loadLive();}
 function applyFilters(){const a=document.querySelector('.page.active');if(a)renderPage(a.id);}
 // ---- funnel(P3/P4) ----
 function rtf(a,b){return b?(a/b*100).toFixed(1)+'%':'—';}
